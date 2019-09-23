@@ -30,8 +30,7 @@ struct Star
     mag::Float64
     ra::Float64
     dec::Float64
-    x::Float64
-    y::Float64
+    xy::SVector
     d::Float64
 end
 
@@ -85,7 +84,9 @@ function read_database(file="URAT1.csv")
     return CSV.file(file)
 end
 
-function distance(x, y, xo, yo)
+function distance(xy, xyo)
+    x, y = xy
+    xo, yo = xyo
     return sqrt((x-xo)^2 + (y-yo)^2)
 end
 
@@ -96,13 +97,15 @@ function generatespd(camera)
 
     f = read_database()
 
+    spd = []
+
     # for starO in f
         starO = iterate(f, 1)[1]
 
         # Transform from RA/DEC to ECI XYZ
         VeciO = radec2eci(starO.RAJ2000, starO.DEJ2000)
         CO = cameraattitude(VeciO)
-        xO, yO = camera2image(CO*VeciO, camera)  # should be the center pixel
+        xyO = camera2image(CO*VeciO, camera)  # should be the center pixel
 
         # Identify neighboring stars in FOV
         neighbors = Array{Star}(undef,0)
@@ -116,19 +119,43 @@ function generatespd(camera)
                 Vcam = CO*Veci
 
                 # Star coordinates on image plane
-                x, y = camera2image(Vcam, camera)
+                xy = camera2image(Vcam, camera)
 
                 # Distance from `starO`
-                d = distance(x, y, xO, yO)
+                d = distance(xy, xyO)
 
                 # TEMP
                 ida, idb = parse.(Int, split(s.URAT1, '-'))
-                push!(neighbors, Star(ida, idb, s.f_mag, s.RAJ2000, s.DEJ2000, x, y, d))
+                push!(neighbors, Star(ida, idb, s.f_mag, s.RAJ2000, s.DEJ2000, xy, d))
             end
         end
 
         # Order by distance
         sort!(neighbors, by = x -> x.d)
+
+        # We use 4 nearest stars
+        @assert length(neighbors) >= 3 "Fewer than 3 neighboring stars!"
+        for i in 1:min(4, length(neighbors))
+            # Save these outside the inner loop because it's used repeatedly
+            V₁ = neighbors[i].xy
+            V̂₁ = V₁/norm(V₁)
+
+            sn = @view neighbors[i:end]
+            path = MVector{length(sn)-1, Tuple{Float64, Float64}}(undef)
+            Vbsum = zero(V₁)
+            for j in 1:length(sn)-1
+                k = j + 1
+
+                Vⱼ = sn[j].xy
+                Vₖ = sn[k].xy
+                V̂ₖ = Vₖ/norm(Vₖ)
+
+                Vbsum += (Vₖ - Vⱼ)
+
+                path[j] = (dot(Vbsum, V̂₁), dot(Vbsum, V̂ₖ))
+            end
+            push!(spd, (neighbors[i].ida, neighbors[i].idb, neighbors[i].d, path))
+        end
 
         return neighbors
     # end
