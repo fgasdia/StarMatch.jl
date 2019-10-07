@@ -9,7 +9,22 @@ module StarMatch
 using LinearAlgebra
 using StaticArrays
 using CSV
+using DataFrames
 
+struct CatalogStar
+  id::Int
+  ra::Float64
+  dec::Float64
+  mag::Float64
+end
+
+struct Star
+    id::Int
+    ra::Float64
+    dec::Float64
+    xy::SVector
+    d::Float64
+end
 
 struct Camera
     img_width::Int
@@ -17,21 +32,11 @@ struct Camera
     pixelsize::Float64
     focallength::Float64
     fov::Float64
-    function Camera(w, h, pixelsize, focallength)
-        imdim = max(h, w)
-        fov = atand(imdim*pixelsize/2/focallength)*2
-        new(w, h, pixelsize, focallength, fov)
-    end
 end
-
-struct Star
-    ida::Int
-    idb::Int
-    mag::Float64
-    ra::Float64
-    dec::Float64
-    xy::SVector
-    d::Float64
+function Camera(w, h, pixelsize, focallength)
+    imdim = max(h, w)
+    fov = atand(imdim*pixelsize/2/focallength)*2
+    Camera(w, h, pixelsize, focallength, fov)
 end
 
 """
@@ -79,38 +84,34 @@ function camera2image(Vcam, camera)
     return (x, y)
 end
 
-
-function read_database(file="URAT1.csv")
-    return CSV.file(file)
-end
-
 function distance(xy, xyo)
     x, y = xy
     xo, yo = xyo
     return sqrt((x-xo)^2 + (y-yo)^2)
 end
 
-function generatespd(camera)
+"""
+`f` needs to use Julia's Tables.jl interface with the following fields:
+    - `id`
+    - `RA`
+    - `DEC`
+"""
+function generatespd(camera::Camera, catalog::Array{CatalogStar})
     # Common values
     halffov = camera.fov/2
     coshalffov = cosd(halffov)
 
-    f = read_database()
-
     spd = []
-
-    # for starO in f
-        starO = iterate(f, 1)[1]
-
+    for starO in catalog
         # Transform from RA/DEC to ECI XYZ
-        VeciO = radec2eci(starO.RAJ2000, starO.DEJ2000)
+        VeciO = radec2eci(starO.ra, starO.dec)
         CO = cameraattitude(VeciO)
         xyO = camera2image(CO*VeciO, camera)  # should be the center pixel
 
         # Identify neighboring stars in FOV
-        neighbors = Array{Star}(undef,0)
-        for s in f
-            Veci = radec2eci(s.RAJ2000, s.DEJ2000)
+        neighbors = Star[]
+        @inbounds for s in catalog
+            Veci = radec2eci(s.ra, s.dec)
 
             # Is star `s` within fov/2 of `starO`?
             # based on dot product / cosine similarity
@@ -124,45 +125,56 @@ function generatespd(camera)
                 # Distance from `starO`
                 d = distance(xy, xyO)
 
-                # TEMP
-                ida, idb = parse.(Int, split(s.URAT1, '-'))
-                push!(neighbors, Star(ida, idb, s.f_mag, s.RAJ2000, s.DEJ2000, xy, d))
+                push!(neighbors, Star(s.id, s.ra, s.dec, xy, d))
             end
         end
 
         # Order by distance
         sort!(neighbors, by = x -> x.d)
 
-        # We use 4 nearest stars
-        @assert length(neighbors) >= 3 "Fewer than 3 neighboring stars!"
-        for i in 1:min(4, length(neighbors))
-            # Save these outside the inner loop because it's used repeatedly
-            V₁ = neighbors[i].xy
-            V̂₁ = V₁/norm(V₁)
+        #==
+        XXX See line 117 in spr_riav-master SPD_generate.m
 
+        He removes the first 4-1 entries of his bound_vector. Is this necessary,
+        or can I include them as I make the path? (obviously not including the
+        stars that are closer than the current SP star)
+
+        We want to include them if possible because we have relatively few stars
+        ==#
+
+        # We try 4 nearest stars to star O as starting points
+        # We only loop to 1 less than length(neighbors)-1 because at the last
+        # neighbor, there are not enough stars for a path
+        @assert length(neighbors) >= 3 "Fewer than 3 neighboring stars!"
+        for i in 1:min(4, length(neighbors)-1)
+            # Save these outside the inner loop because it's used repeatedly
+            V1 = neighbors[i].xy
+            V1u = V1/norm(V1)
+
+            # Generate path for current SP
             sn = @view neighbors[i:end]
             path = MVector{length(sn)-1, Tuple{Float64, Float64}}(undef)
-            Vbsum = zero(V₁)
+            Vbsum = zero(V1)
             for j in 1:length(sn)-1
                 k = j + 1
 
-                Vⱼ = sn[j].xy
-                Vₖ = sn[k].xy
-                V̂ₖ = Vₖ/norm(Vₖ)
+                Vj = sn[j].xy
+                Vk = sn[k].xy
+                Vku = Vk/norm(Vk)
 
-                Vbsum += (Vₖ - Vⱼ)
+                Vbsum += (Vk - Vj)
 
-                path[j] = (dot(Vbsum, V̂₁), dot(Vbsum, V̂ₖ))
+                path[j] = (dot(Vbsum, V1u), dot(Vbsum, Vku))
             end
-            push!(spd, (neighbors[i].ida, neighbors[i].idb, neighbors[i].d, path))
+            push!(spd, (neighbors[i].id, neighbors[i].d, path))
         end
-
-        return neighbors
-    # end
+    end
+    return spd
 end
 
-# RASA 11 / Manta G235
-camera = Camera(1936, 1216, 5.86e-6, 620e-3)
 
+# RASA 11 / Manta G235
+# camera = Camera(1936, 1216, 5.86e-6, 620e-3)
+camera = Camera(1936, 1216, 5.86e-6, 320e-3)
 
 end # module
