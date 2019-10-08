@@ -4,7 +4,6 @@ using StaticArrays
 
 using StarMatch
 
-
 img_width = 1024
 img_height = 1024
 pixelsize = 13.3e-6
@@ -12,7 +11,7 @@ fov = 15.0
 fl = img_height*pixelsize/2/tand(fov/2)
 camera = StarMatch.Camera(img_width, img_height, pixelsize, fl, fov)
 
-f = CSV.file("test\\SKY2000_Magnitude6_doublestars_0.12.txt")
+f = CSV.file("SKY2000_Magnitude6_doublestars_0.12.txt")
 
 catalog = Array{StarMatch.CatalogStar}(undef, f.rows)
 for (i, s) in enumerate(f)
@@ -40,10 +39,10 @@ end
 @testset "SPD creation" begin
     spd = StarMatch.generatespd(camera, catalog)
 
-    d1 = open(readspdfile, "test\\SPD_vect_patt_Mv_6_dist_1.txt")
-    d2 = open(readspdfile, "test\\SPD_vect_patt_Mv_6_dist_2.txt")
-    d3 = open(readspdfile, "test\\SPD_vect_patt_Mv_6_dist_3.txt")
-    d4 = open(readspdfile, "test\\SPD_vect_patt_Mv_6_dist_4.txt")
+    d1 = open(readspdfile, "SPD_vect_patt_Mv_6_dist_1.txt")
+    d2 = open(readspdfile, "SPD_vect_patt_Mv_6_dist_2.txt")
+    d3 = open(readspdfile, "SPD_vect_patt_Mv_6_dist_3.txt")
+    d4 = open(readspdfile, "SPD_vect_patt_Mv_6_dist_4.txt")
 
     # Choose a couple random stars as center star (`starO`) and then compare
     # paths for each `SP` star

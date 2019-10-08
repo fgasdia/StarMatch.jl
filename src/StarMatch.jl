@@ -22,6 +22,8 @@ struct Star
     ra::Float64
     dec::Float64
     xy::SVector{2, Float64}
+    vec::SVector{2, Float64}
+    uvec::SVector{2, Float64}
     d::Float64
 end
 
@@ -90,12 +92,6 @@ function camera2image(Vcam, camera)
     return SVector(x, y)
 end
 
-function distance(xy, xyo)
-    x, y = xy
-    xo, yo = xyo
-    return sqrt((x-xo)^2 + (y-yo)^2)
-end
-
 """
 `f` needs to use Julia's Tables.jl interface with the following fields:
     - `id`
@@ -109,8 +105,6 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
 
     spd = SPDEntry[]
     for starO in catalog
-        # starO = catalog[1]
-
         # Transform from RA/DEC to ECI XYZ
         VeciO = radec2eci(starO.ra, starO.dec)
         CO = cameraattitude(VeciO)
@@ -130,10 +124,16 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
                 # Star coordinates on image plane
                 xy = camera2image(Vcam, camera)
 
-                # Distance from `starO`
-                d = distance(xy, xyO)
+                # Vector from `starO` (center of image) to star `s`
+                svec = xy - xyO
 
-                push!(neighbors, Star(s.id, s.ra, s.dec, xy, d))
+                # Distance from `starO`
+                d = norm(svec)
+
+                # Unit vector from `starO` to star `s`
+                usvec = svec/d
+
+                push!(neighbors, Star(s.id, s.ra, s.dec, xy, svec, usvec, d))
             end
         end
 
@@ -168,11 +168,9 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
             for j in 1:length(sn)-1
                 k = j + 1
 
-                # TODO: This operation is repeated many times, it would be more
-                # efficient to calculate the vector from xyO outside this loop
-                Vj = sn[j].xy - xyO
-                Vk = sn[k].xy - xyO
-                Vku = Vk/norm(Vk)
+                Vj = sn[j].vec
+                Vk = sn[k].vec
+                Vku = sn[k].uvec
 
                 Vbsum += (Vk - Vj)
 
@@ -183,14 +181,5 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
     end
     return spd
 end
-
-#
-# # RASA 11 / Manta G235
-# # camera = Camera(1936, 1216, 5.86e-6, 620e-3)
-# camera = Camera(1936, 1216, 5.86e-6, 320e-3)
-
-
-
-
 
 end # module
