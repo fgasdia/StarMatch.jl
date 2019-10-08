@@ -9,7 +9,6 @@ module StarMatch
 using LinearAlgebra
 using StaticArrays
 using CSV
-using DataFrames
 
 struct CatalogStar
   id::Int
@@ -22,8 +21,15 @@ struct Star
     id::Int
     ra::Float64
     dec::Float64
-    xy::SVector
+    xy::SVector{2, Float64}
     d::Float64
+end
+
+struct SPDEntry{N}
+    Oid::Int
+    SPid::Int
+    d::Float64
+    path::Array{SVector{2, Float64}, N}
 end
 
 struct Camera
@@ -81,7 +87,7 @@ function camera2image(Vcam, camera)
     x = f/ρ*Vcam[1]/Vcam[3] + w/2
     y = f/ρ*Vcam[2]/Vcam[3] + h/2
 
-    return (x, y)
+    return SVector(x, y)
 end
 
 function distance(xy, xyo)
@@ -101,8 +107,10 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
     halffov = camera.fov/2
     coshalffov = cosd(halffov)
 
-    spd = []
+    spd = SPDEntry[]
     for starO in catalog
+        # starO = catalog[1]
+
         # Transform from RA/DEC to ECI XYZ
         VeciO = radec2eci(starO.ra, starO.dec)
         CO = cameraattitude(VeciO)
@@ -133,7 +141,7 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
         sort!(neighbors, by = x -> x.d)
 
         #==
-        XXX See line 117 in spr_riav-master SPD_generate.m
+        NOTE See line 117 in spr_riav-master SPD_generate.m
 
         He removes the first 4-1 entries of his bound_vector. Is this necessary,
         or can I include them as I make the path? (obviously not including the
@@ -145,36 +153,44 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
         # We try 4 nearest stars to star O as starting points
         # We only loop to 1 less than length(neighbors)-1 because at the last
         # neighbor, there are not enough stars for a path
-        @assert length(neighbors) >= 3 "Fewer than 3 neighboring stars!"
+        # NOTE Samirbhai requires 5, we may need more than 3 for a robust solution
+        length(neighbors) < 3 && continue
+
         for i in 1:min(4, length(neighbors)-1)
             # Save these outside the inner loop because it's used repeatedly
-            V1 = neighbors[i].xy
+            V1 = neighbors[i].xy - xyO
             V1u = V1/norm(V1)
 
             # Generate path for current SP
             sn = @view neighbors[i:end]
-            path = MVector{length(sn)-1, Tuple{Float64, Float64}}(undef)
+            path = Array{SVector{2, Float64}}(undef, length(sn)-1)
             Vbsum = zero(V1)
             for j in 1:length(sn)-1
                 k = j + 1
 
-                Vj = sn[j].xy
-                Vk = sn[k].xy
+                # TODO: This operation is repeated many times, it would be more
+                # efficient to calculate the vector from xyO outside this loop
+                Vj = sn[j].xy - xyO
+                Vk = sn[k].xy - xyO
                 Vku = Vk/norm(Vk)
 
                 Vbsum += (Vk - Vj)
 
-                path[j] = (dot(Vbsum, V1u), dot(Vbsum, Vku))
+                path[j] = SVector(dot(Vbsum, V1u), dot(Vbsum, Vku))
             end
-            push!(spd, (neighbors[i].id, neighbors[i].d, path))
+            push!(spd, SPDEntry(starO.id, neighbors[i].id, neighbors[i].d, path))
         end
     end
     return spd
 end
 
+#
+# # RASA 11 / Manta G235
+# # camera = Camera(1936, 1216, 5.86e-6, 620e-3)
+# camera = Camera(1936, 1216, 5.86e-6, 320e-3)
 
-# RASA 11 / Manta G235
-# camera = Camera(1936, 1216, 5.86e-6, 620e-3)
-camera = Camera(1936, 1216, 5.86e-6, 320e-3)
+
+
+
 
 end # module
