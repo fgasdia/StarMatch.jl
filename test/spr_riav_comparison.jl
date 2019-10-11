@@ -1,5 +1,6 @@
 using Test
 using CSV
+using JLD2
 using StaticArrays
 
 using StarMatch
@@ -35,6 +36,11 @@ function readspdfile(f::IOStream)
 
     return vectorpattern
 end
+
+# spd = StarMatch.generatespd(camera, catalog)
+
+# @save "SKY2000_Magnitude6_doublestars_0.12_spd.jd2" spd
+# @load "SKY2000_Magnitude6_doublestars_0.12_spd.jd2" spd
 
 @testset "SPD creation" begin
     spd = StarMatch.generatespd(camera, catalog)
