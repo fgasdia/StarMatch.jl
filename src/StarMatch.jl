@@ -6,6 +6,7 @@ An implementation of Approach 3 (_Rotation Invariant Vector Frame_) from:
 """
 module StarMatch
 
+using Logging
 using LinearAlgebra
 using StaticArrays
 using CSV
@@ -47,6 +48,7 @@ end
 struct Camera
     img_width::Int
     img_height::Int
+    img_center::SVector{2,Float64}
     pixelsize::Float64
     focallength::Float64
     fov::Float64
@@ -54,7 +56,8 @@ end
 function Camera(w, h, pixelsize, focallength)
     imdim = max(h, w)
     fov = atand(imdim*pixelsize/2/focallength)*2
-    Camera(w, h, pixelsize, focallength, fov)
+    center = SVector(w/2, h/2)
+    Camera(w, h, center, pixelsize, focallength, fov)
 end
 
 """
@@ -76,9 +79,9 @@ Transform from RA/DEC to image plane XY.
 See Vallado chapter 4 and the SPD code from Samirbhai.
 """
 function cameraattitude(Veci)
-    tmp = sqrt(Veci[1]^2 + Veci[2]^2)
-    c1x = Veci[2]/tmp
-    c1y = -Veci[1]/tmp
+    tmp = 1/sqrt(Veci[1]^2 + Veci[2]^2)
+    c1x = Veci[2]*tmp
+    c1y = -Veci[1]*tmp
     c1z = 0
     c1 = SVector(c1x, c1y, c1z)
 
@@ -91,7 +94,7 @@ function cameraattitude(Veci)
     return C
 end
 
-function camera2image(Vcam, camera)
+function camera2image(Vcam, camera::Camera)
     f = camera.focallength
     ρ = camera.pixelsize
     w = camera.img_width
@@ -142,7 +145,7 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
     # Common values
     halffov = camera.fov/2
     coshalffov = cosd(halffov)
-    imagecenter = SVector(camera.img_width/2, camera.img_height/2)
+    imagecenter = camera.img_center
 
     # Calculating star position in ECI is surprisingly expensive, so we do it once
     catalogeci = [radec2eci(s.ra, s.dec) for s in catalog]
@@ -206,17 +209,17 @@ end
 
 """
 """
-function solve(camera::Camera, imagestars::AbstractArray{SVector{2, T}},
-    spd::AbstractArray{SPDEntry}; distancetolerance=3, vectortolerance=5) where T <: Real
+function solve(camera::Camera, imagestars::AbstractArray{SVector{2,T}},
+    spd::AbstractArray{SPDEntry}; distancetolerance=3, vectortolerance=4) where T <: Real
 
     @assert length(imagestars) > N_NEAREST "A minimum of $(N_NEAREST+1) stars required to solve image."
 
-    imagecenter = SVector(camera.img_width/2, camera.img_height/2)
+    imagecenter = camera.img_center
 
     # Determine star closest to center. This will be `starO`
     mindist = typemax(T)
-    Oidx = 0
-    for (i, star) in enumerate(imagestars)
+    starO = zero(SVector{2,T})
+    for star in imagestars
         # Vector from star to image center
         svec = star - imagecenter
 
@@ -226,10 +229,9 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2, T}},
         # Check if this star is closer to center than other stars
         if d < mindist
             mindist = d
-            Oidx = i
+            starO = star
         end
     end
-    starO = SVector(imagestars[Oidx])
 
     # Calculate vectors from each star to `starO`
     neighbors = Array{UnknownStar}(undef, length(imagestars)-1)
@@ -249,7 +251,8 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2, T}},
 
     # Check for distance matches with SPD
     candidateindices = Tuple{Int,Int}[]
-    for (j, entry) in enumerate(spd)
+    for j in eachindex(spd)
+        entry = spd[j]
         for i in 1:N_NEAREST
             if norm(entry.d - neighbors[i].d) < distancetolerance
                 push!(candidateindices, (i, j))
@@ -270,12 +273,16 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2, T}},
 
     winnerid = argmax(votecounts)
     winnervotecount = votecounts[winnerid]
-    winnervotecount < VOTE_THRESHOLD && println("Not enough votes! ($winnervotecount/$VOTE_THRESHOLD)")
-    println("$winnervotecount")
+    # TODO: Warn if there is a tie
+
+    @info "Winner has $winnervotecount votes"
+    if winnervotecount < VOTE_THRESHOLD
+        @warn "Winner vote count is below threshold! ($winnervotecount/$VOTE_THRESHOLD)"
+    end
 
     winner = spd[candidateindices[winnerid][2]]
 
-    return winner
+    return starO, winner
 end
 
 end # module

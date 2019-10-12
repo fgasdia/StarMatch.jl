@@ -40,7 +40,7 @@ catalog = [StarMatch.CatalogStar(s.ID, s.RAJ2000, s.DEJ2000, s.mag) for s in f]
     pixelsize = 13.3e-6
     fov = 15.0
     fl = img_height*pixelsize/2/tand(fov/2)
-    camera = StarMatch.Camera(img_width, img_height, pixelsize, fl, fov)
+    camera = StarMatch.Camera(img_width, img_height, pixelsize, fl)
     @test isapprox(camera.focallength, 0.05172405; atol=1e-6)
 
     #==
