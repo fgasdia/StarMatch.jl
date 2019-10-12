@@ -11,7 +11,7 @@ using StaticArrays
 using CSV
 using ProgressMeter
 
-const N_NEAREST = 4
+const N_NEAREST = 5
 const VOTE_THRESHOLD = 3
 
 struct CatalogStar
@@ -22,7 +22,6 @@ struct CatalogStar
 end
 
 struct UnknownStar
-    id::Int
     xy::SVector{2, Float64}
     vec::SVector{2, Float64}
     uvec::SVector{2, Float64}
@@ -39,7 +38,7 @@ end
 
 struct SPDEntry
     starO::CatalogStar
-    SPid::CatalogStar
+    SP::CatalogStar
     d::Float64
     path::Array{SVector{2, Float64}}
     pathstars::Array{CatalogStar}
@@ -121,10 +120,7 @@ function buildpath(neighbors::AbstractArray, V1, V1u)
     return path
 end
 
-function vote(
-    candidateindices,
-    neighborpaths,
-    spd::AbstractArray{SPDEntry};
+function vote(candidateindices, neighborpaths, spd::AbstractArray{SPDEntry};
     vectortolerance=5)
 
     votes = zeros(Int, length(candidateindices))
@@ -137,32 +133,26 @@ function vote(
             end
         end
     end
-
     return votes
 end
 
 """
-`f` needs to use Julia's Tables.jl interface with the following fields:
-    - `id`
-    - `RA`
-    - `DEC`
 """
 function generatespd(camera::Camera, catalog::Array{CatalogStar})
     # Common values
     halffov = camera.fov/2
     coshalffov = cosd(halffov)
+    imagecenter = SVector(camera.img_width/2, camera.img_height/2)
 
-    # Calculating star ECI is surprisingly expensive, so we do it once
+    # Calculating star position in ECI is surprisingly expensive, so we do it once
     catalogeci = [radec2eci(s.ra, s.dec) for s in catalog]
 
     spd = SPDEntry[]
     sizehint!(spd, trunc(Int, 0.9*length(catalog)))
-    # @showprogress 5 "Building SPD..." for starO in catalog
-    for (oi, starO) in enumerate(catalog)
-        # Transform from RA/DEC to ECI XYZ
+    @showprogress 5 "Building SPD..." for (oi, starO) in enumerate(catalog)
         VeciO = catalogeci[oi]
         CO = cameraattitude(VeciO)
-        xyO = camera2image(CO*VeciO, camera)  # should be the center pixel
+        xyO = imagecenter  # = camera2image(CO*VeciO, camera)
 
         # Identify neighboring stars in FOV
         neighbors = KnownStar[]
@@ -170,7 +160,6 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
             Veci = catalogeci[si]
 
             # Is star `s` within fov/2 of `starO`?
-            # based on dot product / cosine similarity
             if dot(Veci, VeciO) > coshalffov && Veci != VeciO
                 # Star coordinates in camera frame
                 Vcam = CO*Veci
@@ -191,26 +180,20 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
             end
         end
 
-        # Order by distance
         sort!(neighbors, by = x -> x.d)
 
         #==
-        NOTE See line 117 in spr_riav-master SPD_generate.m
+        NOTE Samirbhai removes the first N_NEAREST-1 entries of his boundary vector (path).
 
-        He removes the first 4-1 entries of his bound_vector. Is this necessary,  or can I
-        include them as I make the path? (obviously not including the stars that are closer
-        than the current SP star)
-
-        We want to include them if possible because we have relatively few stars
+        They are included here because we tend to have few stars in our FOV and want to use
+        as many of them as possible.
         ==#
         length(neighbors) < N_NEAREST && continue
 
         for i in 1:N_NEAREST
-            # Save these outside the inner loop because it's used repeatedly
             V1 = neighbors[i].vec
             V1u = neighbors[i].uvec
 
-            # Generate path for current SP
             sn = @view neighbors[i:end]
             path = buildpath(sn, V1, V1u)
             pathstars = [n.catalog for n in sn]
@@ -221,12 +204,14 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
     return spd
 end
 
+"""
+"""
 function solve(camera::Camera, imagestars::AbstractArray{SVector{2, T}},
-    spd::AbstractArray{SPDEntry}; distancetolerance=1) where T <: Real
+    spd::AbstractArray{SPDEntry}; distancetolerance=3, vectortolerance=5) where T <: Real
 
-    @assert length(imagestars) > N_NEAREST "A minimum of 5 stars required to solve image."
+    @assert length(imagestars) > N_NEAREST "A minimum of $(N_NEAREST+1) stars required to solve image."
 
-    imagecenter = SVector(camera.img_height/2, camera.img_width/2)
+    imagecenter = SVector(camera.img_width/2, camera.img_height/2)
 
     # Determine star closest to center. This will be `starO`
     mindist = typemax(T)
@@ -244,17 +229,18 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2, T}},
             Oidx = i
         end
     end
-    starO = imagestars[Oidx]
+    starO = SVector(imagestars[Oidx])
 
     # Calculate vectors from each star to `starO`
     neighbors = Array{UnknownStar}(undef, length(imagestars)-1)
     ni = 1
-    for (i, star) in enumerate(imagestars)
+    for star in imagestars
         if star != starO
             svec = star - starO
             d = norm(svec)
             usvec = svec/d
-            neighbors[ni] = UnknownStar(i, SVector(star), svec, usvec, d)
+
+            neighbors[ni] = UnknownStar(SVector(star), svec, usvec, d)
             ni += 1
         # else starOid = i  # just fyi
         end
@@ -271,8 +257,8 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2, T}},
         end
     end
 
-    neighborpaths = Array{Array{SVector{2, Float64}}}(undef, 4)
-    for i in 1:N_NEAREST
+    neighborpaths = Array{Array{SVector{2, Float64}}}(undef, N_NEAREST)
+    @inbounds for i in 1:N_NEAREST
         V1 = neighbors[i].vec
         V1u = neighbors[i].uvec
 
@@ -280,11 +266,12 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2, T}},
         neighborpaths[i] = buildpath(sn, V1, V1u)
     end
 
-    votecounts = vote(candidateindices, neighborpaths, spd)
+    votecounts = vote(candidateindices, neighborpaths, spd; vectortolerance=vectortolerance)
 
     winnerid = argmax(votecounts)
     winnervotecount = votecounts[winnerid]
-    winnervotecount > VOTE_THRESHOLD && println("Not enough votes!")
+    winnervotecount < VOTE_THRESHOLD && println("Not enough votes! ($winnervotecount/$VOTE_THRESHOLD)")
+    println("$winnervotecount")
 
     winner = spd[candidateindices[winnerid][2]]
 
