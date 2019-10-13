@@ -56,7 +56,7 @@ catalog = [StarMatch.CatalogStar(s.ID, s.RAJ2000, s.DEJ2000, s.mag) for s in f]
     d4 = open(readspdfile, "SPD_vect_patt_Mv_6_dist_4.txt")
 
     # starid = 14
-    spd_14 = findall(x->x.starO.id == 14, spd)
+    spd_14 = findall(x->x.starOidx == 14, spd)
 
     d1_diff = d1[14] - spd[spd_14[1]].path
     d1_diffc = [d[1] for d in d1_diff]
@@ -83,7 +83,7 @@ catalog = [StarMatch.CatalogStar(s.ID, s.RAJ2000, s.DEJ2000, s.mag) for s in f]
     @test all(abs.(d4_diffr) .< 1)
 
     # starid = 3864
-    spd_3864 = findall(x->x.starO.id == 3864, spd)
+    spd_3864 = findall(x->x.starOidx == 3864, spd)
 
     d1_diff = d1[3864] - spd[spd_3864[1]].path
     d1_diffc = [d[1] for d in d1_diff]
