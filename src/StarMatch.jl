@@ -6,6 +6,8 @@ An implementation of Approach 3 (_Rotation Invariant Vector Frame_) from:
 """
 module StarMatch
 
+export generatespd, solve
+
 using Logging
 using LinearAlgebra
 using StaticArrays
@@ -14,6 +16,19 @@ using ProgressMeter
 
 const N_NEAREST = 5
 const VOTE_THRESHOLD = 3
+const VECTORTOLERANCE = 4
+
+struct CoordinateVector{T<:Real} <: AbstractVector{T}
+    p::Vector{SVector{2,T}}
+end
+CoordinateVector(::Type{T}, dims::Int) where {T} = CoordinateVector{T}(Vector{SVector{2,T}}(undef, dims));
+Base.size(A::CoordinateVector) = size(A.p)
+Base.IndexStyle(::Type{<:CoordinateVector}) = IndexLinear()
+Base.getindex(A::CoordinateVector, i::Int) = A.p[i]
+Base.setindex!(A::CoordinateVector{T}, v, i::Int) where {T} = (A.p[i] = v)
+Base.similar(A::CoordinateVector{T}) where {T} = CoordinateVector(T, size(A))
+Base.similar(A::CoordinateVector, ::Type{T}, dims::Dims) where {T} = CoordinateVector(T, dims)
+Base.eltype(A::CoordinateVector{T}) where {T} = T
 
 struct CatalogStar
   id::Int
@@ -22,14 +37,16 @@ struct CatalogStar
   mag::Float64
 end
 
-struct UnknownStar
+abstract type ImageStar end
+
+struct UnknownStar <: ImageStar
     xy::SVector{2, Float64}
     vec::SVector{2, Float64}
     uvec::SVector{2, Float64}
     d::Float64
 end
 
-struct KnownStar
+struct KnownStar <: ImageStar
     catalog::CatalogStar
     xy::SVector{2, Float64}
     vec::SVector{2, Float64}
@@ -41,8 +58,8 @@ struct SPDEntry
     starO::CatalogStar
     SP::CatalogStar
     d::Float64
-    path::Array{SVector{2, Float64}}
-    pathstars::Array{CatalogStar}
+    path::CoordinateVector
+    pathstars::Vector{CatalogStar}
 end
 
 struct Camera
@@ -106,8 +123,8 @@ function camera2image(Vcam, camera::Camera)
     return SVector(x, y)
 end
 
-function buildpath(neighbors::AbstractArray, V1, V1u)
-    path = Array{SVector{2, Float64}}(undef, length(neighbors)-1)
+function buildpath(neighbors::AbstractVector{<:ImageStar}, V1, V1u)
+    path = CoordinateVector(Float64, length(neighbors)-1)
     Vbsum = zero(V1)
     @inbounds for j in 1:length(neighbors)-1
         k = j + 1
@@ -123,8 +140,8 @@ function buildpath(neighbors::AbstractArray, V1, V1u)
     return path
 end
 
-function vote(candidateindices, neighborpaths, spd::AbstractArray{SPDEntry};
-    vectortolerance=5)
+function vote(candidateindices::AbstractVector{Tuple{Int, Int}}, neighborpaths::AbstractVector{CoordinateVector},
+    spd::AbstractVector{SPDEntry}; vectortolerance=VECTORTOLERANCE)
 
     votes = zeros(Int, length(candidateindices))
     for (c, (i, j)) in enumerate(candidateindices)
@@ -139,9 +156,46 @@ function vote(candidateindices, neighborpaths, spd::AbstractArray{SPDEntry};
     return votes
 end
 
+function closest(a::SVector{2,T}, X::CoordinateVector) where T <: Real
+    mindist = typemax(T)
+    mindistidx = 0
+    for (i, x) in enumerate(X)
+        dist = norm(a - x)
+        if dist < mindist
+            mindist = dist
+            mindistidx = i
+        end
+    end
+    return mindistidx
+end
+
+function match(starO::SVector{2,T}, winner::SPDEntry, neighbors::AbstractVector{UnknownStar},
+    neighborpath::CoordinateVector; vectortolerance=VECTORTOLERANCE) where T <: Real
+
+    matches = KnownStar[]
+    sizehint!(matches, length(neighbors)+1)
+
+    push!(matches, KnownStar(winner.starO, starO, SVector(0.0, 0.0), SVector(0.0, 0.0), 0.0))
+
+    for i in eachindex(winner.path)
+        p = winner.path[i]
+
+        idx = closest(p, neighborpath)
+        # idx = findfirst(x -> norm(x - p) < vectortolerance, neighborpath)
+
+        if norm(neighborpath[idx] - p) < vectortolerance
+            push!(matches, KnownStar(winner.pathstars[i],
+                neighbors[idx].xy, neighbors[idx].vec, neighbors[idx].uvec, neighbors[idx].d))
+        end
+    end
+    # TODO: handle the last neighbor (neighborpath is 1 shorter than neighbors)
+
+    return matches
+end
+
 """
 """
-function generatespd(camera::Camera, catalog::Array{CatalogStar})
+function generatespd(camera::Camera, catalog::Vector{CatalogStar})
     # Common values
     halffov = camera.fov/2
     coshalffov = cosd(halffov)
@@ -152,6 +206,7 @@ function generatespd(camera::Camera, catalog::Array{CatalogStar})
 
     spd = SPDEntry[]
     sizehint!(spd, trunc(Int, 0.9*length(catalog)))
+
     @showprogress 5 "Building SPD..." for (oi, starO) in enumerate(catalog)
         VeciO = catalogeci[oi]
         CO = cameraattitude(VeciO)
@@ -209,8 +264,8 @@ end
 
 """
 """
-function solve(camera::Camera, imagestars::AbstractArray{SVector{2,T}},
-    spd::AbstractArray{SPDEntry}; distancetolerance=3, vectortolerance=4) where T <: Real
+function solve(camera::Camera, imagestars::CoordinateVector{T},
+    spd::Vector{SPDEntry}; distancetolerance=3, vectortolerance=VECTORTOLERANCE) where T <: Real
 
     @assert length(imagestars) > N_NEAREST "A minimum of $(N_NEAREST+1) stars required to solve image."
 
@@ -234,7 +289,7 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2,T}},
     end
 
     # Calculate vectors from each star to `starO`
-    neighbors = Array{UnknownStar}(undef, length(imagestars)-1)
+    neighbors = Vector{UnknownStar}(undef, length(imagestars)-1)
     ni = 1
     for star in imagestars
         if star != starO
@@ -260,7 +315,7 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2,T}},
         end
     end
 
-    neighborpaths = Array{Array{SVector{2, Float64}}}(undef, N_NEAREST)
+    neighborpaths = Vector{CoordinateVector}(undef, N_NEAREST)
     @inbounds for i in 1:N_NEAREST
         V1 = neighbors[i].vec
         V1u = neighbors[i].uvec
@@ -280,9 +335,14 @@ function solve(camera::Camera, imagestars::AbstractArray{SVector{2,T}},
         @warn "Winner vote count is below threshold! ($winnervotecount/$VOTE_THRESHOLD)"
     end
 
-    winner = spd[candidateindices[winnerid][2]]
+    winningindices = candidateindices[winnerid]
+    winner = spd[winningindices[2]]
 
-    return starO, winner
+    sn = @view neighbors[winningindices[1]:end]
+    matches = match(starO, winner, sn, neighborpaths[winningindices[1]];
+        vectortolerance=vectortolerance)
+
+    return matches
 end
 
 end # module

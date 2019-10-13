@@ -66,13 +66,13 @@ end
   X = read(f[2], "X")
   Y = read(f[2], "Y")
 
-  imagestars = [SVector(x, y) for (x, y) in zip(X, Y)]
+  imagestars = StarMatch.CoordinateVector([SVector(x, y) for (x, y) in zip(X, Y)])
 
-  sO, winner = StarMatch.solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=4)
+  matches = StarMatch.solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=4)
 
   # TYC 4757-1591-1
   truestarO = StarMatch.CatalogStar(475715911, hms2deg(5, 29, 23), dms2deg(-3, 26, 47), 5.92)
-  @test isapprox(winner.starO.ra, truestarO.ra, atol=3*resolution(camera))
+  @test isapprox(matches[1].catalog.ra, truestarO.ra, atol=3*resolution(camera))
 
   # Star positions in simulated image with 118° rotation
   using FITSIO
@@ -80,12 +80,12 @@ end
   X = read(f[2], "X")
   Y = read(f[2], "Y")
 
-  imagestars = [SVector(x, y) for (x, y) in zip(X, Y)]
+  imagestars = StarMatch.CoordinateVector([SVector(x, y) for (x, y) in zip(X, Y)])
 
-  sO, winner = StarMatch.solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=4)
+  matches = StarMatch.solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=4)
 
   # TYC 4757-1591-1
   truestarO = StarMatch.CatalogStar(475715911, hms2deg(5, 29, 23), dms2deg(-3, 26, 47), 5.92)
 
-  @test isapprox(winner.starO.ra, truestarO.ra, atol=3*resolution(camera))
+  @test isapprox(matches[1].catalog.ra, truestarO.ra, atol=3*resolution(camera))
 end
