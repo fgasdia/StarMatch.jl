@@ -304,7 +304,9 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     candidateindices = Tuple{Int,Int}[]
     for j in eachindex(spd)
         entry = spd[j]
-        for i in 1:N_NEAREST
+        @inbounds for i in 1:N_NEAREST
+            # TODO: Repalace norm of difference with explicit check of +/- tolerance in x,y
+            # Possibly faster?
             if norm(entry.d - neighbors[i].d) < distancetolerance
                 push!(candidateindices, (i, j))
             end
