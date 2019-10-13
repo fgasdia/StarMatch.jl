@@ -1,6 +1,5 @@
 using Test
 using CSV
-using JLD2
 using StaticArrays
 
 using StarMatch

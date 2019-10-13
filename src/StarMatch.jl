@@ -1,18 +1,14 @@
-"""
-Solve the ``lost in space'' problem.
+__precompile__()
 
-An implementation of Approach 3 (_Rotation Invariant Vector Frame_) from:
-``A reliable and fast lost-in-space mode star tracker'' by Metha Deval Samirbhai.
-"""
 module StarMatch
-
-export generatespd, solve
 
 using Logging
 using LinearAlgebra
 using StaticArrays
-using CSV
 using ProgressMeter
+
+export generatespd, solve
+export CoordinateVector, Camera, CatalogStar
 
 const N_NEAREST = 5
 const VOTE_THRESHOLD = 3
@@ -330,7 +326,6 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     winnervotecount = votecounts[winnerid]
     # TODO: Warn if there is a tie
 
-    @info "Winner has $winnervotecount votes"
     if winnervotecount < VOTE_THRESHOLD
         @warn "Winner vote count is below threshold! ($winnervotecount/$VOTE_THRESHOLD)"
     end
