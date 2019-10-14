@@ -1,4 +1,6 @@
-# Random speed tests
+#==
+Random tests to compare code speeds.
+==#
 
 #==
 Profiling of `solve()` shows that most time is consumed by occurrences of
@@ -7,7 +9,7 @@ writing this in a different way.
 ==#
 
 # Comparing these three, they get faster at each step, but only by a fraction of a millisecond
-# when performed on 100_000_000 as and bs
+# when performed on 100_000_000 `a`s and `b`s
 jnk = [@SVector rand(Float64, 2) for i = 1:100_000_000]
 jnk2 = [@SVector rand(Float64, 2) for i = 1:100_000_000]
 

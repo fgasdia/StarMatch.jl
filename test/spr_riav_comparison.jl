@@ -27,13 +27,13 @@ function readspdfile(f::IOStream)
 end
 
 #==
-Read and preprocess catalog.
+Read and preprocess Samirbhai catalog.
 ==#
 f = CSV.file("SKY2000_Magnitude6_doublestars_0.12.txt")
 catalog = [StarMatch.CatalogStar(s.ID, s.RAJ2000, s.DEJ2000, s.mag) for s in f]
 
 @testset "SPD creation" begin
-    # Specify camera parameters
+    # Samirbhai camera parameters
     img_width = 1024
     img_height = 1024
     pixelsize = 13.3e-6
@@ -108,7 +108,4 @@ catalog = [StarMatch.CatalogStar(s.ID, s.RAJ2000, s.DEJ2000, s.mag) for s in f]
     d4_diffr = [d[2] for d in d4_diff]
     @test all(abs.(d4_diffc) .< 1)
     @test all(abs.(d4_diffr) .< 1)
-
-    # @save "SKY2000_Magnitude6_doublestars_0.12_spd.jd2" spd
-    # @load "SKY2000_Magnitude6_doublestars_0.12_spd.jd2" spd
 end
