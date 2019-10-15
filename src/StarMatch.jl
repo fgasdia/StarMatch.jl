@@ -49,6 +49,7 @@ struct KnownStar <: ImageStar
     uvec::SVector{2, Float64}
     d::Float64
 end
+Base.zero(::Type{KnownStar}) = KnownStar(0, SVector(0.0,0.0), SVector(0.0,0.0), SVector(0.0,0.0), 0.0)
 
 struct SPDEntry
     starOidx::Int  # catalog idx
@@ -313,6 +314,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
             end
         end
     end
+    @info "$(length(candidateindices)) candidate indices"
 
     neighborpaths = Vector{CoordinateVector}(undef, N_NEAREST)
     @inbounds for i in 1:N_NEAREST
@@ -342,5 +344,9 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
 
     return matches
 end
+
+#==
+Utility functions
+==#
 
 end # module
