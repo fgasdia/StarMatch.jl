@@ -6,6 +6,7 @@ using Logging
 using LinearAlgebra
 using StaticArrays
 using ProgressMeter
+using PushVectors
 
 export generatespd, solve
 export CoordinateVector, Camera, CatalogStar
@@ -81,7 +82,7 @@ RA and DEC in degrees.
 
 See Vallado 4-1.
 """
-function radec2eci(ra, dec)
+@inline function radec2eci(ra, dec)
     sinδ, cosδ = sincos(deg2rad(dec))
     sinα, cosα = sincos(deg2rad(ra))
     return SVector(cosα*cosδ, sinα*cosδ, sinδ)
@@ -92,7 +93,7 @@ Transform from RA/DEC to image plane XY.
 
 See Vallado chapter 4 and the SPD code from Samirbhai.
 """
-function cameraattitude(Veci)
+@inline function cameraattitude(Veci)
     tmp = 1/sqrt(Veci[1]^2 + Veci[2]^2)
     c1x = Veci[2]*tmp
     c1y = -Veci[1]*tmp
@@ -108,7 +109,7 @@ function cameraattitude(Veci)
     return C
 end
 
-function camera2image(Vcam, camera::Camera)
+@inline function camera2image(Vcam, camera::Camera)
     f = camera.focallength
     ρ = camera.pixelsize
     w = camera.img_width
@@ -137,13 +138,19 @@ function buildpath(neighbors::AbstractVector{<:ImageStar}, V1, V1u)
     return path
 end
 
+# TODO
+#XXX: This function completely dominates the runtime of `solve`
+# There is a huge memory allocation too, although I do not know
+# why. The norm(sp-np) is allocating 112 bytes and if done hundreds of thousands of times
+# this might add up?
 function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::AbstractVector{CoordinateVector},
-    spd::AbstractVector{SPDEntry}; vectortolerance=VECTORTOLERANCE)
+    spd::AbstractVector{SPDEntry}, vectortolerance=VECTORTOLERANCE)
 
-    votes = zeros(Int, length(candidateindices))
-    for (c, (i, j)) in enumerate(candidateindices)
-        for sp in spd[j].path
-            for np in neighborpaths[i]
+    # TODO: Reuse `votes` when there are multiple images
+    votes = zeros(UInt32, length(candidateindices))
+    @inbounds for (c, (i, j)) in enumerate(candidateindices)
+        @inbounds for sp in spd[j].path
+            @inbounds for np in neighborpaths[i]
                 if norm(sp - np) < vectortolerance
                     votes[c] += 1
                 end
@@ -169,8 +176,7 @@ end
 function match(starO::SVector{2,T}, winner::SPDEntry, neighbors::AbstractVector{UnknownStar},
     neighborpath::CoordinateVector; vectortolerance=VECTORTOLERANCE) where T <: Real
 
-    matches = KnownStar[]
-    sizehint!(matches, length(neighbors)+1)
+    matches = PushVector{KnownStar}(length(neighbors))
 
     # conversion needed of `starO` in case its type is not Float64
     push!(matches, KnownStar(winner.starOidx, SVector{2,Float64}(starO), SVector(0.0, 0.0), SVector(0.0, 0.0), 0.0))
@@ -192,6 +198,9 @@ function match(starO::SVector{2,T}, winner::SPDEntry, neighbors::AbstractVector{
 end
 
 """
+    generatespd(camera, catalog)
+
+Generate a Star Pattern Database for `camera` and a `catalog` of `CatalogStar`s.
 """
 function generatespd(camera::Camera, catalog::Vector{CatalogStar})
     # Common values
@@ -202,8 +211,8 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
     # Calculating star position in ECI is surprisingly expensive, so we do it once
     catalogeci = [radec2eci(s.ra, s.dec) for s in catalog]
 
-    spd = SPDEntry[]
-    sizehint!(spd, trunc(Int, 0.9*length(catalog)))
+    spd = PushVector{SPDEntry}(length(catalog))
+    neighbors = PushVector{KnownStar}()
 
     @showprogress 5 "Building SPD..." for (oi, starO) in enumerate(catalog)
         VeciO = catalogeci[oi]
@@ -211,7 +220,6 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
         xyO = imagecenter  # = camera2image(CO*VeciO, camera)
 
         # Identify neighboring stars in FOV
-        neighbors = KnownStar[]
         @inbounds for (si, s) in enumerate(catalog)
             Veci = catalogeci[si]
 
@@ -248,7 +256,7 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
         ==#
         length(neighbors) < (N_NEAREST+2) && continue
 
-        for i in 1:N_NEAREST
+        @inbounds for i in 1:N_NEAREST
             V1 = neighbors[i].vec
             V1u = neighbors[i].uvec
 
@@ -258,14 +266,24 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
 
             push!(spd, SPDEntry(oi, neighbors[i].catalogidx, neighbors[i].d, path, pathidxs))
         end
+
+        empty!(neighbors)
     end
+    PushVectors.finish!(spd)
     return spd
 end
 
 """
+    solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=VECTORTOLERANCE)
+
+Return catalog matches from `spd` for `imagestars` extracted from an image taken with
+`camera`. `distancetolerance` is the number of pixels within which the distance from the
+nearest neighbor stars must be to the center star compared to the distances stored in the
+`spd`. `vectortolerance` is the tolerance used in `vote` and `match` to check the `norm` of
+the difference of path vectors.
 """
 function solve(camera::Camera, imagestars::CoordinateVector{T},
-    spd::Vector{SPDEntry}; distancetolerance=3, vectortolerance=VECTORTOLERANCE) where T <: Real
+    spd::AbstractVector{SPDEntry}, distancetolerance=3, vectortolerance=VECTORTOLERANCE) where T <: Real
 
     @assert length(imagestars) > N_NEAREST "A minimum of $(N_NEAREST+1) stars required to solve image."
 
@@ -274,7 +292,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     # Determine star closest to center. This will be `starO`
     mindist = typemax(T)
     starO = zero(SVector{2,T})
-    for star in imagestars
+    @inbounds for star in imagestars
         # Vector from star to image center
         svec = star - imagecenter
 
@@ -291,7 +309,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     # Calculate vectors from each star to `starO`
     neighbors = Vector{UnknownStar}(undef, length(imagestars)-1)
     ni = 1
-    for star in imagestars
+    @inbounds for star in imagestars
         if star != starO
             svec = star - starO
             d = norm(svec)
@@ -304,8 +322,10 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     end
     sort!(neighbors, by = x -> x.d)
 
+
+    # TODO: Reuse `candidateindices` when we handle multiple images
     # Check for distance matches with SPD
-    candidateindices = Tuple{Int,Int}[]
+    candidateindices = PushVector{Tuple{Int,Int}}()
     for j in eachindex(spd)
         entry = spd[j]
         @inbounds for i in 1:N_NEAREST
@@ -314,7 +334,8 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
             end
         end
     end
-    @info "$(length(candidateindices)) candidate indices"
+    PushVectors.finish!(candidateindices)
+    # @info "$(length(candidateindices)) candidate indices"
 
     neighborpaths = Vector{CoordinateVector}(undef, N_NEAREST)
     @inbounds for i in 1:N_NEAREST
@@ -325,7 +346,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
         neighborpaths[i] = buildpath(sn, V1, V1u)
     end
 
-    votecounts = vote(candidateindices, neighborpaths, spd; vectortolerance=vectortolerance)
+    votecounts = vote(candidateindices, neighborpaths, spd, vectortolerance)
 
     winnerid = argmax(votecounts)
     winnervotecount = votecounts[winnerid]
@@ -345,8 +366,10 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     return matches
 end
 
-#==
-Utility functions
-==#
 
+#
+# #==
+# Utility functions
+# ==#
+#
 end # module

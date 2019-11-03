@@ -19,10 +19,10 @@ function dms2deg(d,m,s)
 end
 
 """
-Calculate pixel scale (i.e. resolution) in arcsec
+Calculate pixel scale (i.e. resolution) in degrees
 """
 function resolution(camera::StarMatch.Camera)
-    return 2*atand(camera.pixelsize/2/camera.focallength)*3600
+    return 2*atand(camera.pixelsize/2/camera.focallength)
 end
 
 
@@ -59,7 +59,7 @@ function solvenarrowimage()
 end
 
 @testset "Image solve" begin
-        #==
+    #==
     Simulated wide, shallow field (mag +6)
 
     Use Tycho-2 catalog
@@ -76,14 +76,14 @@ end
 
     imagestars = StarMatch.CoordinateVector([SVector(x, y) for (x, y) in zip(f.PixelX, f.PixelY)])
 
-    matches = StarMatch.solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=4)
+    matches = StarMatch.solve(camera, imagestars, spd, 3, 4)
 
     trueRAs = getproperty(f, Symbol("RA(deg)"))
     trueDECs = getproperty(f, Symbol("Dec(deg)"))
     for m in matches
         truestaridx = findfirst((f.PixelX .== m.xy[1]) .& (f.PixelY .== m.xy[2]))
-        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=3*resolution(camera))
-        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=3*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=10*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=10*resolution(camera))
     end
 
     #==
