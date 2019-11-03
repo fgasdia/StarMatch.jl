@@ -19,10 +19,10 @@ function dms2deg(d,m,s)
 end
 
 """
-Calculate pixel scale (i.e. resolution) in arcsec
+Calculate pixel scale (i.e. resolution) in degrees
 """
 function resolution(camera::StarMatch.Camera)
-    return 2*atand(camera.pixelsize/2/camera.focallength)*3600
+    return 2*atand(camera.pixelsize/2/camera.focallength)
 end
 
 
@@ -82,8 +82,8 @@ end
     trueDECs = getproperty(f, Symbol("Dec(deg)"))
     for m in matches
         truestaridx = findfirst((f.PixelX .== m.xy[1]) .& (f.PixelY .== m.xy[2]))
-        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=3*resolution(camera))
-        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=3*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=10*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=10*resolution(camera))
     end
 
     #==
@@ -104,7 +104,7 @@ end
 
     for m in matches
         truestaridx = findfirst((imagedata.PixelX .== m.xy[1]) .& (imagedata.PixelY .== m.xy[2]))
-        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=3*resolution(camera))
-        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=3*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=10*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=10*resolution(camera))
     end
 end
