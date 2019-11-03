@@ -1,9 +1,13 @@
 using Test
 using CSV
 using FITSIO
+using FileIO
+using JLD2
 using StaticArrays
 
 using StarMatch
+
+const gaiaspd = load("gaia_dr2_+11.jld2", "spd")
 
 function hms2deg(h,m,s)
     dechrs = h + m/60 + s/3600
@@ -21,39 +25,86 @@ function resolution(camera::StarMatch.Camera)
     return 2*atand(camera.pixelsize/2/camera.focallength)*3600
 end
 
+
+function buildgaiaspd()
+    camera = StarMatch.Camera(1936, 1216, 5.86e-6, 620e-3)
+
+    f = CSV.file("gaia_dr2_+11.csv")
+
+    # TODO: Remove double stars
+    catalog = [StarMatch.CatalogStar(s.source_id, s.ra, s.dec, s.phot_g_mean_mag) for s in f]
+
+    spd = StarMatch.generatespd(camera, catalog)
+
+    save("gaia_dr2_+11.jld2", Dict("spd"=>spd))
+end
+
+function solvenarrowimage()
+    camera = StarMatch.Camera(1936, 1216, 5.86e-6, 620e-3)
+
+    # TODO: Filtering for latitude; if s.dec > (29-90)  # Daytona, FL is 29° latitude
+    # TODO: and what stars are in the sky at observation time
+    # XXX: We really need to do this for a significant speedup
+
+    # Star positions in simulated image
+    imagedata = CSV.File("synthetic_25deg_+10.5.txt"; header=3)
+
+    imagestars = StarMatch.CoordinateVector([SVector(x, y) for (x, y) in zip(imagedata.PixelX,
+        imagedata.PixelY)])
+
+    @time matches = StarMatch.solve(camera, imagestars, gaiaspd; distancetolerance=2,
+        vectortolerance=3)
+
+    return imagedata, matches
+end
+
 @testset "Image solve" begin
-    # Simulated image
+        #==
+    Simulated wide, shallow field (mag +6)
+
+    Use Tycho-2 catalog
+    ==#
     camera = StarMatch.Camera(2048, 2048, 5e-6, 100e-3)
 
     f = CSV.file("SKY2000_Magnitude6_doublestars_0.12.txt")
     catalog = [StarMatch.CatalogStar(s.ID, s.RAJ2000, s.DEJ2000, s.mag) for s in f]
-    spd = StarMatch.generatespd(camera, catalog)
 
-    # Star positions in simulated image without rotation
-    using FITSIO
-    f = FITS("axy_syntheticim_0deg_+6.fits")
-    X = read(f[2], "X")
-    Y = read(f[2], "Y")
+    spd = StarMatch.generatespd(camera, catalog)  # only takes a second
 
-    imagestars = StarMatch.CoordinateVector([SVector(x, y) for (x, y) in zip(X, Y)])
+    # Star positions in simulated image
+    f = CSV.File("synthetic_254deg_+6.txt"; header=3)
+
+    imagestars = StarMatch.CoordinateVector([SVector(x, y) for (x, y) in zip(f.PixelX, f.PixelY)])
 
     matches = StarMatch.solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=4)
 
-    # TYC 4757-1591-1
-    truestarO = StarMatch.CatalogStar(475715911, hms2deg(5, 29, 23), dms2deg(-3, 26, 47), 5.92)
-    @test isapprox(matches[1].catalog.ra, truestarO.ra, atol=3*resolution(camera))
+    trueRAs = getproperty(f, Symbol("RA(deg)"))
+    trueDECs = getproperty(f, Symbol("Dec(deg)"))
+    for m in matches
+        truestaridx = findfirst((f.PixelX .== m.xy[1]) .& (f.PixelY .== m.xy[2]))
+        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=3*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=3*resolution(camera))
+    end
 
-    # Star positions in simulated image with 118° rotation
-    f = FITS("axy_syntheticim_118deg_+6.fits")
-    X = read(f[2], "X")
-    Y = read(f[2], "Y")
+    #==
+    Simulated narrow, deep field (mag +10)
 
-    imagestars = StarMatch.CoordinateVector([SVector(x, y) for (x, y) in zip(X, Y)])
+    Use Gaia DR2
+    ==#
+    camera = StarMatch.Camera(1936, 1216, 5.86e-6, 620e-3)
 
-    matches = StarMatch.solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=4)
+    f = CSV.file("gaia_dr2_+11.csv")
+    # TODO: Remove double stars
+    catalog = [StarMatch.CatalogStar(s.source_id, s.ra, s.dec, s.phot_g_mean_mag) for s in f]
 
-    # TYC 4757-1591-1
-    truestarO = StarMatch.CatalogStar(475715911, hms2deg(5, 29, 23), dms2deg(-3, 26, 47), 5.92)
+    imagedata, matches = solvenarrowimage()
 
-    @test isapprox(matches[1].catalog.ra, truestarO.ra, atol=3*resolution(camera))
+    trueRAs = getproperty(imagedata, Symbol("RA(deg)"))
+    trueDECs = getproperty(imagedata, Symbol("Dec(deg)"))
+
+    for m in matches
+        truestaridx = findfirst((imagedata.PixelX .== m.xy[1]) .& (imagedata.PixelY .== m.xy[2]))
+        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=3*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=3*resolution(camera))
+    end
 end
