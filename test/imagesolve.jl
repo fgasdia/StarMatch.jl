@@ -52,8 +52,7 @@ function solvenarrowimage()
     imagestars = StarMatch.CoordinateVector([SVector(x, y) for (x, y) in zip(imagedata.PixelX,
         imagedata.PixelY)])
 
-    @time matches = StarMatch.solve(camera, imagestars, gaiaspd; distancetolerance=2,
-        vectortolerance=3)
+    @time matches = StarMatch.solve(camera, imagestars, gaiaspd, 2, 3)
 
     return imagedata, matches
 end
@@ -82,6 +81,7 @@ end
     trueDECs = getproperty(f, Symbol("Dec(deg)"))
     for m in matches
         truestaridx = findfirst((f.PixelX .== m.xy[1]) .& (f.PixelY .== m.xy[2]))
+        println(truestaridx)
         @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=10*resolution(camera))
         @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=10*resolution(camera))
     end
@@ -104,7 +104,7 @@ end
 
     for m in matches
         truestaridx = findfirst((imagedata.PixelX .== m.xy[1]) .& (imagedata.PixelY .== m.xy[2]))
-        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=3*resolution(camera))
-        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=3*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=10*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=10*resolution(camera))
     end
 end

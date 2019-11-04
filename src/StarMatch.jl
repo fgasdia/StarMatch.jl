@@ -160,7 +160,7 @@ function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::A
     return votes
 end
 
-function closest(X::CoordinateVector, a::SVector{2,T}) where T <: Real
+function closest(X::CoordinateVector{T}, a::SVector{2,T}) where T <: Real
     mindist = typemax(T)
     mindistidx = 0
     for (i, x) in enumerate(X)
@@ -174,7 +174,7 @@ function closest(X::CoordinateVector, a::SVector{2,T}) where T <: Real
 end
 
 function match(starO::SVector{2,T}, winner::SPDEntry, neighbors::AbstractVector{UnknownStar},
-    neighborpath::CoordinateVector; vectortolerance=VECTORTOLERANCE) where T <: Real
+    neighborpath::CoordinateVector, vectortolerance=VECTORTOLERANCE) where T <: Real
 
     matches = PushVector{KnownStar}(length(neighbors))
 
@@ -211,7 +211,7 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
     # Calculating star position in ECI is surprisingly expensive, so we do it once
     catalogeci = [radec2eci(s.ra, s.dec) for s in catalog]
 
-    spd = PushVector{SPDEntry}(length(catalog))
+    spd = PushVector{SPDEntry}(length(catalog)*N_NEAREST)
     neighbors = PushVector{KnownStar}()
 
     @showprogress 5 "Building SPD..." for (oi, starO) in enumerate(catalog)
@@ -360,8 +360,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     winner = spd[winningindices[2]]
 
     sn = @view neighbors[winningindices[1]:end]
-    matches = match(starO, winner, sn, neighborpaths[winningindices[1]];
-        vectortolerance=vectortolerance)
+    matches = match(starO, winner, sn, neighborpaths[winningindices[1]], vectortolerance)
 
     return matches
 end
