@@ -139,21 +139,22 @@ function buildpath(neighbors::AbstractVector{<:ImageStar}, V1, V1u)
 end
 
 
-
 # TODO
 #XXX: This function completely dominates the runtime of `solve`
 # There is a huge memory allocation too, although I do not know
 # why. The norm(sp-np) is allocating 112 bytes and if done hundreds of thousands of times
 # this might add up?
-function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::AbstractVector{CoordinateVector},
-    spd::AbstractVector{SPDEntry}, vectortolerance=VECTORTOLERANCE)
+function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::AbstractVector{CoordinateVector{T}},
+    spd::AbstractVector{SPDEntry}, vectortolerance=VECTORTOLERANCE) where T
 
     # TODO: Reuse `votes` when there are multiple images
     votes = zeros(UInt32, length(candidateindices))
     @inbounds for (c, (i, j)) in enumerate(candidateindices)
         votecount = 0
-        @inbounds for sp in spd[j].path
-            @inbounds for np in neighborpaths[i]
+        spdpath = spd[j].path
+        neighborpath = neighborpaths[i]
+        @inbounds for sp in spdpath
+            @inbounds for np in neighborpath
                 if norm(sp - np) < vectortolerance
                     votecount += 1
                 end
@@ -327,7 +328,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     PushVectors.finish!(candidateindices)
     # @info "$(length(candidateindices)) candidate indices"
 
-    neighborpaths = Vector{CoordinateVector}(undef, N_NEAREST)
+    neighborpaths = Vector{CoordinateVector{Float64}}(undef, N_NEAREST)
     @inbounds for i in 1:N_NEAREST
         V1 = neighbors[i].vec
         V1u = neighbors[i].uvec
@@ -335,6 +336,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
         sn = @view neighbors[i:end]
         neighborpaths[i] = buildpath(sn, V1, V1u)
     end
+    # XXX: Up to here, only ~0.12 seconds and 35 alloc: 4.5 MB
 
     votecounts = vote(candidateindices, neighborpaths, spd, vectortolerance)
 
