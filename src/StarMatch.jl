@@ -82,7 +82,7 @@ RA and DEC in degrees.
 
 See Vallado 4-1.
 """
-@inline function radec2eci(ra, dec)
+function radec2eci(ra, dec)
     sinδ, cosδ = sincos(deg2rad(dec))
     sinα, cosα = sincos(deg2rad(ra))
     return SVector(cosα*cosδ, sinα*cosδ, sinδ)
@@ -93,7 +93,7 @@ Transform from RA/DEC to image plane XY.
 
 See Vallado chapter 4 and the SPD code from Samirbhai.
 """
-@inline function cameraattitude(Veci)
+function cameraattitude(Veci)
     tmp = 1/sqrt(Veci[1]^2 + Veci[2]^2)
     c1x = Veci[2]*tmp
     c1y = -Veci[1]*tmp
@@ -109,7 +109,7 @@ See Vallado chapter 4 and the SPD code from Samirbhai.
     return C
 end
 
-@inline function camera2image(Vcam, camera::Camera)
+function camera2image(Vcam, camera::Camera)
     f = camera.focallength
     ρ = camera.pixelsize
     w = camera.img_width
@@ -137,6 +137,8 @@ function buildpath(neighbors::AbstractVector{<:ImageStar}, V1, V1u)
     end
     return path
 end
+
+
 
 # TODO
 #XXX: This function completely dominates the runtime of `solve`
@@ -290,21 +292,8 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     imagecenter = camera.img_center
 
     # Determine star closest to center. This will be `starO`
-    mindist = typemax(T)
-    starO = zero(SVector{2,T})
-    @inbounds for star in imagestars
-        # Vector from star to image center
-        svec = star - imagecenter
-
-        # Distance from star to image center
-        d = norm(svec)
-
-        # Check if this star is closer to center than other stars
-        if d < mindist
-            mindist = d
-            starO = star
-        end
-    end
+    starOidx = closest(imagestars, imagecenter)
+    starO = imagestars[starOidx]
 
     # Calculate vectors from each star to `starO`
     neighbors = Vector{UnknownStar}(undef, length(imagestars)-1)
