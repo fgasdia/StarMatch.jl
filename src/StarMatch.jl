@@ -151,13 +151,15 @@ function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::A
     # TODO: Reuse `votes` when there are multiple images
     votes = zeros(UInt32, length(candidateindices))
     @inbounds for (c, (i, j)) in enumerate(candidateindices)
+        votecount = 0
         @inbounds for sp in spd[j].path
             @inbounds for np in neighborpaths[i]
                 if norm(sp - np) < vectortolerance
-                    votes[c] += 1
+                    votecount += 1
                 end
             end
         end
+        votes[c] += votecount
     end
     return votes
 end
@@ -298,7 +300,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     # Calculate vectors from each star to `starO`
     neighbors = Vector{UnknownStar}(undef, length(imagestars)-1)
     ni = 1
-    @inbounds for star in imagestars
+    for star in imagestars
         if star != starO
             svec = star - starO
             d = norm(svec)
@@ -311,14 +313,13 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     end
     sort!(neighbors, by = x -> x.d)
 
-
     # TODO: Reuse `candidateindices` when we handle multiple images
     # Check for distance matches with SPD
     candidateindices = PushVector{Tuple{Int,Int}}()
     for j in eachindex(spd)
-        entry = spd[j]
+        spddist = spd[j].d
         @inbounds for i in 1:N_NEAREST
-            if norm(entry.d - neighbors[i].d) < distancetolerance
+            if norm(spddist - neighbors[i].d) < distancetolerance
                 push!(candidateindices, (i, j))
             end
         end
