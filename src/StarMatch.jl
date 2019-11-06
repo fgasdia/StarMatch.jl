@@ -138,23 +138,17 @@ function buildpath(neighbors::AbstractVector{<:ImageStar}, V1, V1u)
     return path
 end
 
-
-# TODO
-#XXX: This function completely dominates the runtime of `solve`
-# There is a huge memory allocation too, although I do not know
-# why. The norm(sp-np) is allocating 112 bytes and if done hundreds of thousands of times
-# this might add up?
 function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::AbstractVector{CoordinateVector{T}},
     spd::AbstractVector{SPDEntry}, vectortolerance=VECTORTOLERANCE) where T
 
     # TODO: Reuse `votes` when there are multiple images
     votes = zeros(UInt32, length(candidateindices))
-    @inbounds for (c, (i, j)) in enumerate(candidateindices)
+    for (c, (i, j)) in enumerate(candidateindices)
         votecount = 0
         spdpath = spd[j].path
         neighborpath = neighborpaths[i]
-        @inbounds for sp in spdpath
-            @inbounds for np in neighborpath
+        for sp in spdpath
+            for np in neighborpath
                 if norm(sp - np) < vectortolerance
                     votecount += 1
                 end
@@ -190,7 +184,6 @@ function match(starO::SVector{2,T}, winner::SPDEntry, neighbors::AbstractVector{
         p = winner.path[i]
 
         idx = closest(neighborpath, p)
-        # idx = findfirst(x -> norm(x - p) < vectortolerance, neighborpath)
 
         if norm(neighborpath[idx] - p) < vectortolerance
             push!(matches, KnownStar(winner.pathidxs[i],
@@ -290,7 +283,9 @@ the difference of path vectors.
 function solve(camera::Camera, imagestars::CoordinateVector{T},
     spd::AbstractVector{SPDEntry}, distancetolerance=3, vectortolerance=VECTORTOLERANCE) where T <: Real
 
-    @assert length(imagestars) > N_NEAREST "A minimum of $(N_NEAREST+1) stars required to solve image."
+    if length(imagestars) <= N_NEAREST
+        return nothing
+    end
 
     imagecenter = camera.img_center
 
@@ -315,37 +310,38 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     sort!(neighbors, by = x -> x.d)
 
     # TODO: Reuse `candidateindices` when we handle multiple images
-    # Check for distance matches with SPD
-    candidateindices = PushVector{Tuple{Int,Int}}()
+    # Check for distance matches with SPD, approx that 1/20 are candidates
+    candidateindices = PushVector{Tuple{Int,Int}}(floor(Int, length(spd)/20))
     for j in eachindex(spd)
         spddist = spd[j].d
-        @inbounds for i in 1:N_NEAREST
+        for i in 1:N_NEAREST
             if norm(spddist - neighbors[i].d) < distancetolerance
                 push!(candidateindices, (i, j))
             end
         end
     end
     PushVectors.finish!(candidateindices)
-    # @info "$(length(candidateindices)) candidate indices"
 
     neighborpaths = Vector{CoordinateVector{Float64}}(undef, N_NEAREST)
-    @inbounds for i in 1:N_NEAREST
+    for i in 1:N_NEAREST
         V1 = neighbors[i].vec
         V1u = neighbors[i].uvec
 
         sn = @view neighbors[i:end]
         neighborpaths[i] = buildpath(sn, V1, V1u)
     end
-    # XXX: Up to here, only ~0.12 seconds and 35 alloc: 4.5 MB
 
     votecounts = vote(candidateindices, neighborpaths, spd, vectortolerance)
 
     winnerid = argmax(votecounts)
     winnervotecount = votecounts[winnerid]
-    # TODO: Warn if there is a tie
 
     if winnervotecount < VOTE_THRESHOLD
         @warn "Winner vote count is below threshold! ($winnervotecount/$VOTE_THRESHOLD)"
+        return nothing
+    elseif count(votecounts .== winnervotecount) > 1
+        @warn "Vote resulted in a tie!"
+        return nothing
     end
 
     winningindices = candidateindices[winnerid]
