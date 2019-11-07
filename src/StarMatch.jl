@@ -109,6 +109,11 @@ function cameraattitude(Veci)
     return C
 end
 
+"""
+    camera2image(Vcam, camera)
+
+Convert vector `Vcam` in camera frame to image plane coordinates.
+"""
 function camera2image(Vcam, camera::Camera)
     f = camera.focallength
     ρ = camera.pixelsize
@@ -121,6 +126,12 @@ function camera2image(Vcam, camera::Camera)
     return SVector(x, y)
 end
 
+"""
+    buildpath(neighbors, V1, V1u)
+
+Construct a rotation invariant vector path along `neighbors` with vector `V1` and unit
+vector `V1u`.
+"""
 function buildpath(neighbors::AbstractVector{<:ImageStar}, V1, V1u)
     path = CoordinateVector(Float64, length(neighbors)-1)
     Vbsum = zero(V1)
@@ -138,8 +149,17 @@ function buildpath(neighbors::AbstractVector{<:ImageStar}, V1, V1u)
     return path
 end
 
-function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::AbstractVector{CoordinateVector{T}},
-    spd::AbstractVector{SPDEntry}, vectortolerance=VECTORTOLERANCE) where T
+"""
+    vote(candidateindices, neighborpaths, spd, vectortolerance)
+
+Give a vote if norm of the difference for `candidateindices` of `neighborpaths` and `spd`
+are within `vectortolerance`.
+"""
+function vote(
+    candidateindices::AbstractVector{Tuple{Int,Int}},
+    neighborpaths::AbstractVector{CoordinateVector{T}},
+    spd::AbstractVector{SPDEntry},
+    vectortolerance=VECTORTOLERANCE) where T
 
     # TODO: Reuse `votes` when there are multiple images
     votes = zeros(UInt32, length(candidateindices))
@@ -149,7 +169,7 @@ function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::A
         neighborpath = neighborpaths[i]
         for sp in spdpath
             for np in neighborpath
-                if norm(sp - np) < vectortolerance
+                if abs(sp[1] - np[1]) < vectortolerance && abs(sp[2] - np[2]) < vectortolerance
                     votecount += 1
                 end
             end
@@ -159,6 +179,11 @@ function vote(candidateindices::AbstractVector{Tuple{Int,Int}}, neighborpaths::A
     return votes
 end
 
+"""
+    closest(X, a)
+
+Return index of `X` that is closest distance to `a`.
+"""
 function closest(X::CoordinateVector{T}, a::SVector{2,T}) where T <: Real
     mindist = typemax(T)
     mindistidx = 0
@@ -175,24 +200,39 @@ end
 function match(starO::SVector{2,T}, winner::SPDEntry, neighbors::AbstractVector{UnknownStar},
     neighborpath::CoordinateVector, vectortolerance=VECTORTOLERANCE) where T <: Real
 
-    matches = PushVector{KnownStar}(length(neighbors))
+    nmatches = PushVector{KnownStar}(length(neighbors))
 
     # conversion needed of `starO` in case its type is not Float64
-    push!(matches, KnownStar(winner.starOidx, SVector{2,Float64}(starO), SVector(0.0, 0.0), SVector(0.0, 0.0), 0.0))
+    push!(nmatches, KnownStar(winner.starOidx, SVector{2,Float64}(starO), SVector(0.0, 0.0),
+                             SVector(0.0, 0.0), 0.0))
 
-    for i in eachindex(winner.path)
-        p = winner.path[i]
+    lastmatched = false
+    for i in eachindex(neighborpath)
+        idx = closest(winner.path, neighborpath[i])
 
-        idx = closest(neighborpath, p)
+        wp = winner.path[idx]
+        np = neighborpath[i]
 
-        if norm(neighborpath[idx] - p) < vectortolerance
-            push!(matches, KnownStar(winner.pathidxs[i],
-                neighbors[idx].xy, neighbors[idx].vec, neighbors[idx].uvec, neighbors[idx].d))
+        if abs(np[1] - wp[1]) < vectortolerance && abs(np[2] - wp[2]) < vectortolerance
+            lastmatched = true
+            push!(nmatches, KnownStar(winner.pathidxs[idx], neighbors[i].xy,
+                                     neighbors[i].vec, neighbors[i].uvec,
+                                     neighbors[i].d))
+        else
+            lastmatched = false
         end
     end
-    # TODO: handle the last neighbor (neighborpath is 1 shorter than neighbors)
 
-    return matches
+    # If both path components matched on last neighbor star, lets assume the star is correct
+    # and belongs to the next winner path index.
+    if lastmatched
+        idx = closest(winner.path, neighborpath[end])
+        push!(nmatches, KnownStar(winner.pathidxs[idx+1], neighbors[end].xy,
+                                  neighbors[end].vec, neighbors[end].uvec,
+                                  neighbors[end].d))
+    end
+
+    return nmatches
 end
 
 """
@@ -346,6 +386,9 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
 
     winningindices = candidateindices[winnerid]
     winner = spd[winningindices[2]]
+
+#     return starO, winner, neighbors[winningindices[1]:end], neighborpaths[winningindices[1]]
+# end
 
     sn = @view neighbors[winningindices[1]:end]
     matches = match(starO, winner, sn, neighborpaths[winningindices[1]], vectortolerance)

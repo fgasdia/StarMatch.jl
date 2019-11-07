@@ -25,7 +25,6 @@ function resolution(camera::StarMatch.Camera)
     return 2*atand(camera.pixelsize/2/camera.focallength)
 end
 
-
 function buildgaiaspd()
     camera = StarMatch.Camera(1936, 1216, 5.86e-6, 620e-3)
 
@@ -52,7 +51,7 @@ function solvenarrowimage()
     imagestars = StarMatch.CoordinateVector{Float64}([SVector(x, y) for (x, y) in zip(imagedata.PixelX,
         imagedata.PixelY)])
 
-    @time matches = StarMatch.solve(camera, imagestars, gaiaspd, 2, 3)
+    @time matches = StarMatch.solve(camera, imagestars, gaiaspd, 2, 2)
 
     return imagedata, matches
 end
@@ -79,7 +78,7 @@ end
 
     trueRAs = getproperty(f, Symbol("RA(deg)"))
     trueDECs = getproperty(f, Symbol("Dec(deg)"))
-    for m in enumerate(matches)
+    for m in matches
         truestaridx = findfirst((f.PixelX .== m.xy[1]) .& (f.PixelY .== m.xy[2]))
         # println(truestaridx)
         @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=10*resolution(camera))
@@ -107,4 +106,9 @@ end
         @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=10*resolution(camera))
         @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=10*resolution(camera))
     end
+
+    using Plots
+    scatter(trueRAs, trueDECs, xlims=(71.2,72.4), ylims=(26.9,27.6))
+    scatter!(getfield.(catalog[getfield.(matches, :catalogidx)], :ra), getfield.(catalog[getfield.(matches, :catalogidx)], :dec), markeralpha=0.4)
+    scatter!(getfield.(catalog, :ra), getfield.(catalog,:dec), markersize=2)
 end
