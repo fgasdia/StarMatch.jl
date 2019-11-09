@@ -121,7 +121,7 @@ end
 
     for m in matches
         truestaridx = findfirst((imagedata.PixelX .== m.xy[1]) .& (imagedata.PixelY .== m.xy[2]))
-        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=10*resolution(camera))
-        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=10*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].ra, trueRAs[truestaridx], atol=3*resolution(camera))
+        @test isapprox(catalog[m.catalogidx].dec, trueDECs[truestaridx], atol=3*resolution(camera))
     end
 end
