@@ -24,6 +24,13 @@ git-tree-sha1 = "fab12b19f198dd148ca467ac4e4f12ecd0241819"
 uuid = "92933f4c-e287-5a05-a399-4b506db050ca"
 version = "1.1.0"
 
+[[PushVectors]]
+git-tree-sha1 = "f157c6758aba95f179d28fcb6b3928d9e5e8c4d9"
+repo-rev = "master"
+repo-url = "https://github.com/tpapp/PushVectors.jl"
+uuid = "36b54c61-190e-5a5f-82d5-6f0a962d7362"
+version = "0.2.0"
+
 [[Random]]
 deps = ["Serialization"]
 uuid = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
@@ -40,9 +47,9 @@ uuid = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [[StaticArrays]]
 deps = ["LinearAlgebra", "Random", "Statistics"]
-git-tree-sha1 = "db23bbf50064c582b6f2b9b043c8e7e98ea8c0c6"
+git-tree-sha1 = "5a3bcb6233adabde68ebc97be66e95dcb787424c"
 uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "0.11.0"
+version = "0.12.1"
 
 [[Statistics]]
 deps = ["LinearAlgebra", "SparseArrays"]
