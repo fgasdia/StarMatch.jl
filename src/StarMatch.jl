@@ -206,31 +206,20 @@ Match `neighbors` to path indexes of `winner` and add them as `KnownStar`s to `m
 function match!(matches, winner::SPDEntry, neighbors::AbstractVector{UnknownStar},
     neighborpath::CoordinateVector, vectortolerance=VECTOR_TOLERANCE) where T <: Real
 
-    matched = false
-    lastidx = 0
+    # The first neighbor _must_ be correct, otherwise we wouldn't have the correct solution
+    push!(matches, KnownStar(winner.SPidx, neighbors[1].xy, neighbors[1].vec,
+                             neighbors[1].uvec, neighbors[1].d))
+
     for i in eachindex(neighborpath)
         np = neighborpath[i]
         idx = closest(winner.path, np)
-        wp = winner.path[idx]
+        @inbounds wp = winner.path[idx]
 
         if abs(np[1] - wp[1]) < vectortolerance && abs(np[2] - wp[2]) < vectortolerance
-            matched = true
-            push!(matches, KnownStar(winner.pathidxs[lastidx+1], neighbors[i].xy,
-                                     neighbors[i].vec, neighbors[i].uvec,
-                                     neighbors[i].d))
-            lastidx = idx  # must come after push! b/c it's used to index `winner.pathidxs`
-        else
-            matched = false
+            push!(matches, KnownStar(winner.pathidxs[idx+1], neighbors[i+1].xy,
+                                     neighbors[i+1].vec, neighbors[i+1].uvec,
+                                     neighbors[i+1].d))
         end
-    end
-
-    # If both path components matched on last neighbor star, let's assume the star is correct
-    # and belongs to the next winner path index.
-    # Note `pathidxs` is always 1 larger than `path`.
-    if matched
-        push!(matches, KnownStar(winner.pathidxs[lastidx+1], neighbors[end].xy,
-                                 neighbors[end].vec, neighbors[end].uvec,
-                                 neighbors[end].d))
     end
 
     return matches
@@ -259,8 +248,8 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
         xyO = imagecenter  # == camera2image(CO*VeciO, camera)
 
         # Identify neighboring stars in FOV
-        @inbounds for (si, s) in enumerate(catalog)
-            Veci = catalogeci[si]
+        for (si, s) in enumerate(catalog)
+            @inbounds Veci = catalogeci[si]
 
             # Is star `s` within fov/2 of `starO`?
             if dot(Veci, VeciO) > coshalffov && Veci != VeciO
@@ -358,7 +347,7 @@ function solve(
     candidateindices = PushVector{Tuple{Int,Int}}(floor(Int, length(spd)/20))
     for j in eachindex(spd)
         spddist = spd[j].d
-        for i in 1:N_NEAREST
+        @inbounds for i in 1:N_NEAREST
             if norm(spddist - neighbors[i].d) < distancetolerance
                 push!(candidateindices, (i, j))
             end
@@ -367,7 +356,7 @@ function solve(
     PushVectors.finish!(candidateindices)
 
     neighborpaths = Vector{CoordinateVector{Float64}}(undef, N_NEAREST)
-    for i in 1:N_NEAREST
+    @inbounds for i in 1:N_NEAREST
         V1 = neighbors[i].vec
         V1u = neighbors[i].uvec
 
@@ -398,7 +387,7 @@ function solve(
     sn = @view neighbors[winningindices[1]:end]
     match!(matches, winner, sn, neighborpaths[winningindices[1]], vectortolerance)
 
-    return matches, winner, neighborpaths[winningindices[1]]
+    return matches
 end
 
 end # module
