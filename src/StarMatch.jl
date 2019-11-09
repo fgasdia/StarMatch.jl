@@ -13,7 +13,7 @@ export CoordinateVector, Camera, CatalogStar
 
 const N_NEAREST = 5
 const VOTE_THRESHOLD = 3
-const VECTORTOLERANCE = 4
+const VECTOR_TOLERANCE = 4
 
 struct CoordinateVector{T<:Real} <: AbstractVector{T}
     p::Vector{SVector{2,T}}
@@ -26,6 +26,7 @@ Base.setindex!(A::CoordinateVector{T}, v, i::Int) where {T} = (A.p[i] = v)
 Base.similar(A::CoordinateVector{T}) where {T} = CoordinateVector(T, size(A))
 Base.similar(A::CoordinateVector, ::Type{T}, dims::Dims) where {T} = CoordinateVector(T, dims)
 Base.eltype(A::CoordinateVector{T}) where {T} = T
+Base.deleteat!(A::CoordinateVector{T}, inds) where {T} = deleteat!(A.p, inds)
 
 struct CatalogStar
   id::Int
@@ -159,7 +160,7 @@ function vote(
     candidateindices::AbstractVector{Tuple{Int,Int}},
     neighborpaths::AbstractVector{CoordinateVector{T}},
     spd::AbstractVector{SPDEntry},
-    vectortolerance=VECTORTOLERANCE) where T
+    vectortolerance=VECTOR_TOLERANCE) where T
 
     # TODO: Reuse `votes` when there are multiple images
     votes = zeros(UInt32, length(candidateindices))
@@ -197,42 +198,42 @@ function closest(X::CoordinateVector{T}, a::SVector{2,T}) where T <: Real
     return mindistidx
 end
 
-function match(starO::SVector{2,T}, winner::SPDEntry, neighbors::AbstractVector{UnknownStar},
-    neighborpath::CoordinateVector, vectortolerance=VECTORTOLERANCE) where T <: Real
+"""
+    match!(matches, winner, neighbors, neighborpath, vectortolerance)
 
-    nmatches = PushVector{KnownStar}(length(neighbors))
+Match `neighbors` to path indexes of `winner` and add them as `KnownStar`s to `matches`.
+"""
+function match!(matches, winner::SPDEntry, neighbors::AbstractVector{UnknownStar},
+    neighborpath::CoordinateVector, vectortolerance=VECTOR_TOLERANCE) where T <: Real
 
-    # conversion needed of `starO` in case its type is not Float64
-    push!(nmatches, KnownStar(winner.starOidx, SVector{2,Float64}(starO), SVector(0.0, 0.0),
-                             SVector(0.0, 0.0), 0.0))
-
-    lastmatched = false
+    matched = false
+    lastidx = 0
     for i in eachindex(neighborpath)
-        idx = closest(winner.path, neighborpath[i])
-
-        wp = winner.path[idx]
         np = neighborpath[i]
+        idx = closest(winner.path, np)
+        wp = winner.path[idx]
 
         if abs(np[1] - wp[1]) < vectortolerance && abs(np[2] - wp[2]) < vectortolerance
-            lastmatched = true
-            push!(nmatches, KnownStar(winner.pathidxs[idx], neighbors[i].xy,
+            matched = true
+            push!(matches, KnownStar(winner.pathidxs[lastidx+1], neighbors[i].xy,
                                      neighbors[i].vec, neighbors[i].uvec,
                                      neighbors[i].d))
+            lastidx = idx  # must come after push! b/c it's used to index `winner.pathidxs`
         else
-            lastmatched = false
+            matched = false
         end
     end
 
-    # If both path components matched on last neighbor star, lets assume the star is correct
+    # If both path components matched on last neighbor star, let's assume the star is correct
     # and belongs to the next winner path index.
-    if lastmatched
-        idx = closest(winner.path, neighborpath[end])
-        push!(nmatches, KnownStar(winner.pathidxs[idx+1], neighbors[end].xy,
-                                  neighbors[end].vec, neighbors[end].uvec,
-                                  neighbors[end].d))
+    # Note `pathidxs` is always 1 larger than `path`.
+    if matched
+        push!(matches, KnownStar(winner.pathidxs[lastidx+1], neighbors[end].xy,
+                                 neighbors[end].vec, neighbors[end].uvec,
+                                 neighbors[end].d))
     end
 
-    return nmatches
+    return matches
 end
 
 """
@@ -255,7 +256,7 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
     @showprogress 5 "Building SPD..." for (oi, starO) in enumerate(catalog)
         VeciO = catalogeci[oi]
         CO = cameraattitude(VeciO)
-        xyO = imagecenter  # = camera2image(CO*VeciO, camera)
+        xyO = imagecenter  # == camera2image(CO*VeciO, camera)
 
         # Identify neighboring stars in FOV
         @inbounds for (si, s) in enumerate(catalog)
@@ -285,7 +286,7 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
         sort!(neighbors, by = x -> x.d)
 
         #==
-        NOTE Samirbhai removes the first N_NEAREST-1 entries of his boundary vector (path).
+        NOTE: Samirbhai removes the first N_NEAREST-1 entries of his boundary vector (path).
 
         They are included here because we tend to have few stars in our FOV and want to use
         as many of them as possible.
@@ -304,7 +305,6 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
 
             push!(spd, SPDEntry(oi, neighbors[i].catalogidx, neighbors[i].d, path, pathidxs))
         end
-
         empty!(neighbors)
     end
     PushVectors.finish!(spd)
@@ -312,7 +312,7 @@ function generatespd(camera::Camera, catalog::Vector{CatalogStar})
 end
 
 """
-    solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=VECTORTOLERANCE)
+    solve(camera, imagestars, spd; distancetolerance=3, vectortolerance=VECTOR_TOLERANCE)
 
 Return catalog matches from `spd` for `imagestars` extracted from an image taken with
 `camera`. `distancetolerance` is the number of pixels within which the distance from the
@@ -320,8 +320,12 @@ nearest neighbor stars must be to the center star compared to the distances stor
 `spd`. `vectortolerance` is the tolerance used in `vote` and `match` to check the `norm` of
 the difference of path vectors.
 """
-function solve(camera::Camera, imagestars::CoordinateVector{T},
-    spd::AbstractVector{SPDEntry}, distancetolerance=3, vectortolerance=VECTORTOLERANCE) where T <: Real
+function solve(
+    camera::Camera,
+    imagestars::CoordinateVector{T},
+    spd::AbstractVector{SPDEntry},
+    distancetolerance=3,
+    vectortolerance=VECTOR_TOLERANCE) where T <: Real
 
     if length(imagestars) <= N_NEAREST
         return nothing
@@ -342,7 +346,7 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
             d = norm(svec)
             usvec = svec/d
 
-            neighbors[ni] = UnknownStar(star, svec, usvec, d)
+            @inbounds neighbors[ni] = UnknownStar(star, svec, usvec, d)
             ni += 1
         # else starOid = i  # just fyi
         end
@@ -387,19 +391,14 @@ function solve(camera::Camera, imagestars::CoordinateVector{T},
     winningindices = candidateindices[winnerid]
     winner = spd[winningindices[2]]
 
-#     return starO, winner, neighbors[winningindices[1]:end], neighborpaths[winningindices[1]]
-# end
+    matches = PushVector{KnownStar}(length(neighbors))
+    push!(matches, KnownStar(winner.starOidx, SVector{2,Float64}(starO), SVector(0.0, 0.0),
+                             SVector(0.0, 0.0), 0.0))
 
     sn = @view neighbors[winningindices[1]:end]
-    matches = match(starO, winner, sn, neighborpaths[winningindices[1]], vectortolerance)
+    match!(matches, winner, sn, neighborpaths[winningindices[1]], vectortolerance)
 
-    return matches
+    return matches, winner, neighborpaths[winningindices[1]]
 end
 
-
-#
-# #==
-# Utility functions
-# ==#
-#
 end # module
