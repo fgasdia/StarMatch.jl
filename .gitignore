@@ -1,4 +1,10 @@
 *.csv
+test/gaia_dr2_\+11.jld2
+
+test/gaia_dr2_\+11.jld2.new
+
 test/gaia_dr2_\+11.jld2.old
 
-test/gaia_dr2_\+11.jld2
+test/scratch.jl
+test/hash_comparison.jl
+test/speedtests.jl
